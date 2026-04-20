@@ -148,7 +148,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: vajrapu-srikanth04/stacks
-          # path: keda-repo
+          path: keda-repo
       
       - name: checkout shared workflows
         uses: actions/checkout@v5
