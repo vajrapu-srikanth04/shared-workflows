@@ -1,0 +1,184 @@
+name: "[Reusable] Toggle HPA / KEDA scaling"
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: 'Enable or disable KEDA scaling'
+        required: true
+        type: string
+      argocd_services:
+        description: 'json array of argocd services to update'
+        required: true
+        type: string
+      keda_files:
+        description: 'json array of keda files to apply or delete'
+        required: true
+        type: string
+    secrets:
+      GH_TOKEN:
+        description: 'GitHub token with repo access'
+        required: true
+
+
+
+
+jobs:
+  toggle-argocd-hpa:
+    name: "Toggle HPA / KEDA scaling for ArgoCD services"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(inputs.argocd_services) }}
+    
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ matrix.service.repo }}
+          path: argocd-repo
+
+      - name: "checkout shared workflows"
+        uses: actions/checkout@v5
+        with:
+          repository: vajrapu-srikanth04/shared-workflows
+          path: pyscripts
+
+      - name: "Install dependencies"
+        run: |
+          pip install ruamel.yaml
+          sudo snap install yq
+
+      - name: check if hpa.yaml exists in helm chart
+        id: hpa_check
+        run: |
+          
+          CHART_DIR=$(find argocd-manifests/${{ matrix.service.application_folder_name }}/${{ matrix.service.chart_name }}" \
+            -type f -name "${{ matrix.service.env_file_name }}" | head -n 1 | xargs dirname)
+
+          if [ -z "$CHART_DIR" ]; then
+            echo "Could not find ${{ matrix.service.env_file_name }} under ${{matrix.service.chart_name}}"
+            exit 1
+          fi
+
+          ENV_FILE="$CHART_DIR/${{ matrix.service.env_file_name }}"
+          CHART_VERSION=$(yq e '.spec.source.targetRevision' "$ENV_FILE")
+          echo "targetRevision: $CHART_VERSION"
+
+          HPA_FOUND="false"
+
+          if ["$CHART_VERSION" = "HEAD" ]; then
+            git clone https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/helm-charts.git helm-charts
+
+            HPA_PATH="helm-charts/charts/${{ matrix.service.chart_name }}/templates/hpa.yaml"
+
+            if [ -f "$HPA_PATH" ]; then
+              echo "HPA file found at $HPA_PATH"
+              HPA_FOUND="true"
+            else
+              echo "No HPA file found for ${{ matrix.service.chart_name }}"
+            fi
+          else
+            echo "${{ secrets.GH_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            helm pull oci://ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }} --version $CHART_VERSION --untar
+
+            HPA_PATH="${{ matrix.service.chart_name }}/templates/hpa.yaml"
+
+            if [ -f "$HPA_PATH" ]; then
+              echo "HPA file found at $HPA_PATH"
+              HPA_FOUND="true"
+            else
+              echo "No HPA file found for ${{ matrix.service.chart_name }}"
+            fi
+          fi
+          echo hpa_found=$HPA_FOUND >> $GITHUB_OUTPUT
+
+        
+      - name: "Toggle scaling"
+        if: steps.hpa_check.outputs.hpa_found == 'true'
+        run: |
+          AUTOSCALING_VALUE="${{ inputs.mode == 'night' && 'false' || 'true' }}"
+          echo "Service: ${{ matrix.service.name }}"
+          echo "App Folder: ${{ matrix.service.application_folder_name }}"
+          echo "Chart : ${{ matrix.service.chart_name }}"
+          echo "Env File: ${{ matrix.service.env_file_name }}"
+          echo "Setting autoscaling.enabled=$AUTOSCALING_VALUE"
+          
+          python3 pyscripts/update-parameters.py \
+            add \
+            "${{ github.workspace}}/argocd-manifests/${{ matrix.service.application_folder_name }}" \
+            "${{ matrix.service.chart_name }}" \
+            "${{ matrix.service.env_file_name }}" \
+            "autoscaling.enabled" \
+            "$AUTOSCALING_VALUE"
+
+      - name: "Commit and push changes"
+        if: steps.hpa_check.outputs.hpa_found == 'true'
+        run: |
+          cd "${{ github.workspace }}/argocd-manifests"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          GIT_RETRY=0
+          until [ "$GIT_RETRY" -ge 10 ]; do
+            git commit -m "chore(${{ matrix.service.name }}): toggle autoscaling to $AUTOSCALING_VALUE [skip ci]" && break
+            GIT_RETRY=$((GIT_RETRY + 1))
+            WAIT=$((1 + RANDOM % 5))
+            echo "push failed"
+            sleep $WAIT
+            git pull --rebase
+          done
+
+  toggle-keda:
+    name: "Apply or delete KEDA files for scaling"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        keda_file: ${{ fromJson(inputs.keda_files) }}
+    
+    steps:
+      - name: "Apply or delete KEDA file"
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ matrix.keda_file.repo }}
+          path: keda-repo
+      
+      - name: checkout shared workflows
+        uses: actions/checkout@v5
+        with:
+          repository: vajrapu-srikanth04/shared-workflows
+          path: pyscripts
+
+      - name: Toggle KEDA file
+        env:
+          FILE_PATH: "keda-repo/${{ matrix.keda_file.path }}"
+          MODE: "${{ inputs.mode }}"
+        run: |
+          python3 pyscripts/utils/toggle_keda.py ${{ env.FILE_PATH }} ${{ env.MODE }}
+
+      - name: "Commit and push KEDA file changes"
+        run: |
+          cd "keda-repo"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          if git diff --cached --quiet; then
+            echo "No changes"
+            exit 0
+          fi
+          GIT_RETRY=0
+          until [ "$GIT_RETRY" -ge 10 ]; do
+            git commit -m "chore(${{ matrix.service.name }}): toggle autoscaling to $AUTOSCALING_VALUE [skip ci]" && break
+            GIT_RETRY=$((GIT_RETRY + 1))
+            WAIT=$((1 + RANDOM % 5))
+            echo "push failed"
+            sleep $WAIT
+            git pull --rebase
+          done
