@@ -147,7 +147,7 @@ jobs:
       - name: "Apply or delete KEDA file"
         uses: actions/checkout@v5
         with:
-          repository: stacks
+          repository: vajrapu-srikanth04/stacks
           # path: keda-repo
       
       - name: checkout shared workflows
