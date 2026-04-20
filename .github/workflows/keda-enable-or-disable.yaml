@@ -36,14 +36,14 @@ jobs:
         with:
           repository: ${{ matrix.service.repo }}
           path: argocd-manifests
-          # token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Checkout shared workflows"
         uses: actions/checkout@v4
         with:
           repository: vajrapu-srikanth04/shared-workflows
           path: pyscripts
-          # token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GHITHUB_TOKEN }}
 
       - name: "Install dependencies"
         run: |
