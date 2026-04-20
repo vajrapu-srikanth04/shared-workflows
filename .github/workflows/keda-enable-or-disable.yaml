@@ -16,7 +16,7 @@ on:
         required: true
         type: string
     secrets:
-      GH_TOKEN:
+      GITHUB_TOKEN:
         description: 'GitHub token with repo access'
         required: true
 
@@ -36,14 +36,14 @@ jobs:
         with:
           repository: ${{ matrix.service.repo }}
           path: argocd-manifests
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Checkout shared workflows"
         uses: actions/checkout@v4
         with:
           repository: vajrapu-srikanth04/shared-workflows
           path: pyscripts
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Install dependencies"
         run: |
@@ -69,11 +69,11 @@ jobs:
           
           if [ "$CHART_VERSION" = "main" ] || [ "$CHART_VERSION" = "master" ] || [ "$CHART_VERSION" = "HEAD" ]; then
             git clone --depth 1 \
-              "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/helm-charts.git" \
+              "https://${{github.actor}}:${{ secrets.GITHUB_TOKEN }}@github.com/vajrapu-srikanth04/helm-charts.git" \
               helm-charts 2>/dev/null || true
             HPA_PATH="helm-charts/${CHART_PATH}/templates/hpa.yaml"
           else
-            echo "${{ secrets.GH_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
+            echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
             helm pull "oci://ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }}" \
               --version "$CHART_VERSION" --untar --destination /tmp 2>/dev/null || {
               echo "⚠️ Failed to pull chart, skipping HPA check"
@@ -122,7 +122,7 @@ jobs:
           COMMIT_MSG="chore(${{ matrix.service.name }}): toggle autoscaling.enabled to $AUTOSCALING_VALUE [skip ci]"
           
           # Configure auth for push
-          git remote set-url origin "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/${{ matrix.service.repo }}.git"
+          git remote set-url origin "https://${{github.actor}}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ matrix.service.repo }}.git"
           
           GIT_RETRY=0
           until [ "$GIT_RETRY" -ge 10 ]; do
@@ -150,14 +150,14 @@ jobs:
         with:
           repository: vajrapu-srikanth04/stacks
           path: keda-repo
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
       
       - name: "Checkout shared workflows"
         uses: actions/checkout@v4
         with:
           repository: vajrapu-srikanth04/shared-workflows
           path: pyscripts
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: "Debug: Show KEDA file before toggle"
         run: |
@@ -201,7 +201,7 @@ jobs:
           COMMIT_MSG="chore: toggle KEDA scaling to ${{ inputs.mode }} mode [skip ci]"
           
           # Configure auth for push
-          git remote set-url origin "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/stacks.git"
+          git remote set-url origin "https://${{github.actor}}:${{ secrets.GITHUB_TOKEN }}@github.com/vajrapu-srikanth04/stacks.git"
           
           GIT_RETRY=0
           until [ "$GIT_RETRY" -ge 10 ]; do
