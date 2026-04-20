@@ -147,8 +147,8 @@ jobs:
       - name: "Apply or delete KEDA file"
         uses: actions/checkout@v5
         with:
-          repository: ${{ matrix.keda_file.repo }}
-          path: keda-repo
+          repository: stacks
+          # path: keda-repo
       
       - name: checkout shared workflows
         uses: actions/checkout@v5
