@@ -40,7 +40,7 @@ def normalize_parameters(data: dict):
 
 def add_or_update_param(file_path: Path, name: str, value: str):
     data = load_yaml(file_path)
-    ensure_parameters_structure(data)
+    data = ensure_parameters_structure(data)
     data = normalize_parameters(data)
     params = data["spec"]["source"]["helm"]["parameters"]
     
