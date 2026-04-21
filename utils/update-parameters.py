@@ -17,7 +17,7 @@ def save_yaml(path: Path, data):
     with path.open("w") as f:
         yaml.dump(data, f)
 
-def find_env_files(app_folder: Path, chart_name: str, env_file: str) -> Path | None:
+def find_env_file(app_folder: Path, chart_name: str, env_file: str) -> Path | None:
     candidates = [p for p in app_folder.rglob(env_file) if chart_name in p.parts]
     if not candidates:
         return None
