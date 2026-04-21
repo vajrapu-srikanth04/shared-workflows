@@ -54,46 +54,59 @@ jobs:
         id: hpa_check
         run: |
           set -e
-          APP_FILE="argocd-manifests/${{ matrix.service.application_folder_name }}/${{ matrix.service.env_file_name }}"
+          APP_FOLDER="argocd-manifests/${{ matrix.service.application_folder_name }}"
+          ENV_FILE="${{ matrix.service.env_file_name }}"
+          echo "Searching for $ENV_FILE under $APP_FOLDER"
+
+          APP_FILE=$(find "$APP_FOLDER" -type f -name "$ENV_FILE" 2>/dev/null | head -n 1)
           
-          if [ ! -f "$APP_FILE" ]; then
-            echo "❌ ArgoCD file not found: $APP_FILE"
-            exit 1
-          fi
-          
-          CHART_VERSION=$(yq e '.spec.source.targetRevision' "$APP_FILE")
-          CHART_PATH=$(yq e '.spec.source.path' "$APP_FILE")
-          
-          HPA_FOUND="false"
-          
-          if [ "$CHART_VERSION" = "main" ] || [ "$CHART_VERSION" = "master" ] || [ "$CHART_VERSION" = "HEAD" ]; then
-            git clone --depth 1 \
-              "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/helm-charts.git" \
-              helm-charts 2>/dev/null || true
-            HPA_PATH="helm-charts/${CHART_PATH}/templates/hpa.yaml"
-          else
-            echo "${{ secrets.GH_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
-            helm pull "oci://ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }}" \
-              --version "$CHART_VERSION" --untar --destination /tmp 2>/dev/null || {
-              echo "hpa_found=false" >> $GITHUB_OUTPUT
-              exit 0
-            }
-            HPA_PATH="/tmp/${{ matrix.service.chart_name }}/templates/hpa.yaml"
-          fi
-          
-          if [ -f "$HPA_PATH" ]; then
-            echo "✅ HPA file found: $HPA_PATH"
-            HPA_FOUND="true"
-          else
-            echo "⚠️ No HPA file at: $HPA_PATH"
-          fi
-          echo "hpa_found=$HPA_FOUND" >> $GITHUB_OUTPUT
+              if [ -z "$APP_FILE" ] || [ ! -f "$APP_FILE" ]; then
+                echo "❌ ArgoCD file not found: $ENV_FILE under $APP_FOLDER"
+                echo "📁 Available files:"
+                find "$APP_FOLDER" -type f -name "*.yaml" | head -20 || true
+                exit 1
+              fi
+              
+              echo "✅ Found ArgoCD file: $APP_FILE"
+              
+              # Extract chart version and path
+              CHART_VERSION=$(yq e '.spec.source.targetRevision' "$APP_FILE")
+              CHART_PATH=$(yq e '.spec.source.path' "$APP_FILE")
+              echo "🎯 targetRevision: $CHART_VERSION, path: $CHART_PATH"
+              
+              HPA_FOUND="false"
+              
+              if [ "$CHART_VERSION" = "main" ] || [ "$CHART_VERSION" = "master" ] || [ "$CHART_VERSION" = "HEAD" ]; then
+                echo "🔍 Cloning helm-charts repo for branch: $CHART_VERSION"
+                git clone --depth 1 \
+                  "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/helm-charts.git" \
+                  helm-charts 2>/dev/null || true
+                HPA_PATH="helm-charts/${CHART_PATH}/templates/hpa.yaml"
+              else
+                echo "🔍 Pulling OCI chart: ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }}:$CHART_VERSION"
+                echo "${{ secrets.GH_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
+                helm pull "oci://ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }}" \
+                  --version "$CHART_VERSION" --untar --destination /tmp 2>/dev/null || {
+                  echo "⚠️ Failed to pull chart, skipping HPA check"
+                  echo "hpa_found=false" >> $GITHUB_OUTPUT
+                  exit 0
+                }
+                HPA_PATH="/tmp/${{ matrix.service.chart_name }}/templates/hpa.yaml"
+              fi
+              
+              if [ -f "$HPA_PATH" ]; then
+                echo "✅ HPA file found: $HPA_PATH"
+                HPA_FOUND="true"
+              else
+                echo "⚠️ No HPA file at: $HPA_PATH"
+              fi
+              echo "hpa_found=$HPA_FOUND" >> $GITHUB_OUTPUT
 
       - name: "Toggle autoscaling parameter"
         if: steps.hpa_check.outputs.hpa_found == 'true'
         run: |
           AUTOSCALING_VALUE="${{ inputs.mode == 'night' && 'false' || 'true' }}"
-          python3 pyscripts/update-parameters.py \
+          python3 pyscripts/utils/update-parameters.py \
             add \
             "${{ github.workspace }}/argocd-manifests/${{ matrix.service.application_folder_name }}" \
             "${{ matrix.service.chart_name }}" \
