@@ -34,7 +34,7 @@ def normalize_parameters(data: dict):
     params = data.get("spec", {}).get("source", {}).get("helm", {}).get("parameters", [])
     dedup = {}
     for p in params:
-        dedup[p["name"]] = p
+        dedup[p['name']] = p
     data["spec"]["source"]["helm"]["parameters"] = list(dedup.values())
     return data
 
