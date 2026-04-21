@@ -1,3 +1,199 @@
+# name: "[Reusable] Toggle HPA / KEDA scaling"
+
+# on:
+#   workflow_call:
+#     inputs:
+#       mode:
+#         description: 'Enable or disable KEDA scaling'
+#         required: true
+#         type: string
+#       argocd_services:
+#         description: 'json array of argocd services to update'
+#         required: true
+#         type: string
+#       keda_files:
+#         description: 'json array of keda files to apply or delete'
+#         required: true
+#         type: string
+#     secrets:
+#       GH_TOKEN:  # ✅ Renamed from GITHUB_TOKEN
+#         description: 'GitHub token with repo access'
+#         required: true
+
+# jobs:
+#   toggle-argocd-hpa:
+#     name: "Toggle HPA / KEDA scaling for ArgoCD services"
+#     runs-on: ubuntu-latest
+#     if: inputs.argocd_services != '[]'
+#     strategy:
+#       fail-fast: false
+#       matrix:
+#         service: ${{ fromJson(inputs.argocd_services) }}
+    
+#     steps:
+#       - name: "Checkout ArgoCD manifests repo"
+#         uses: actions/checkout@v4
+#         with:
+#           repository: ${{ matrix.service.repo }}
+#           path: argocd-manifests
+#           token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
+
+#       - name: "Checkout shared workflows"
+#         uses: actions/checkout@v4
+#         with:
+#           repository: vajrapu-srikanth04/shared-workflows
+#           path: pyscripts
+#           token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
+
+#       - name: "Check if hpa.yaml exists in helm chart"
+#         id: hpa_check
+#         run: |
+#           set -e
+#           pip install ruamel.yaml
+#           sudo snap install yq
+    
+#           APP_FOLDER="argocd-manifests/${{ matrix.service.application_folder_name }}"
+#           ENV_FILE="${{ matrix.service.env_file_name }}"
+#           echo "Searching for $ENV_FILE under $APP_FOLDER"
+
+#           APP_FILE=$(find "$APP_FOLDER" -type f -name "$ENV_FILE" 2>/dev/null | head -n 1)
+          
+#               if [ -z "$APP_FILE" ] || [ ! -f "$APP_FILE" ]; then
+#                 echo "❌ ArgoCD file not found: $ENV_FILE under $APP_FOLDER"
+#                 echo "📁 Available files:"
+#                 find "$APP_FOLDER" -type f -name "*.yaml" | head -20 || true
+#                 exit 1
+#               fi
+              
+#               echo "✅ Found ArgoCD file: $APP_FILE"
+              
+#               # Extract chart version and path
+#               CHART_VERSION=$(yq e '.spec.source.targetRevision' "$APP_FILE")
+#               CHART_PATH=$(yq e '.spec.source.path' "$APP_FILE")
+#               echo "🎯 targetRevision: $CHART_VERSION, path: $CHART_PATH"
+              
+#               HPA_FOUND="false"
+              
+#               if [ "$CHART_VERSION" = "main" ] || [ "$CHART_VERSION" = "master" ] || [ "$CHART_VERSION" = "HEAD" ]; then
+#                 echo "🔍 Cloning helm-charts repo for branch: $CHART_VERSION"
+#                 git clone --depth 1 \
+#                   "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/helm-charts.git" \
+#                   helm-charts 2>/dev/null || true
+#                 HPA_PATH="helm-charts/${CHART_PATH}/templates/hpa.yaml"
+#               else
+#                 echo "🔍 Pulling OCI chart: ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }}:$CHART_VERSION"
+#                 echo "${{ secrets.GH_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
+#                 helm pull "oci://ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }}" \
+#                   --version "$CHART_VERSION" --untar --destination /tmp 2>/dev/null || {
+#                   echo "⚠️ Failed to pull chart, skipping HPA check"
+#                   echo "hpa_found=false" >> $GITHUB_OUTPUT
+#                   exit 0
+#                 }
+#                 HPA_PATH="/tmp/${{ matrix.service.chart_name }}/templates/hpa.yaml"
+#               fi
+              
+#               if [ -f "$HPA_PATH" ]; then
+#                 echo "✅ HPA file found: $HPA_PATH"
+#                 HPA_FOUND="true"
+#               else
+#                 echo "⚠️ No HPA file at: $HPA_PATH"
+#               fi
+#               echo "hpa_found=$HPA_FOUND" >> $GITHUB_OUTPUT
+
+#       - name: "Toggle autoscaling parameter"
+#         if: steps.hpa_check.outputs.hpa_found == 'true'
+#         run: |
+#           AUTOSCALING_VALUE="${{ inputs.mode == 'night' && 'false' || 'true' }}"
+#           python3 pyscripts/utils/update-parameters.py add "${{ github.workspace }}/argocd-manifests/${{ matrix.service.application_folder_name }}" "${{ matrix.service.chart_name }}" "${{ matrix.service.env_file_name }}" "autoscaling.enabled" "$AUTOSCALING_VALUE"
+
+#       - name: "Commit and push ArgoCD changes"
+#         if: steps.hpa_check.outputs.hpa_found == 'true'
+#         run: |
+#           cd "${{ github.workspace }}/argocd-manifests"
+#           git config user.name "github-actions[bot]"
+#           git config user.email "github-actions[bot]@users.noreply.github.com"
+#           git add -A
+          
+#           if git diff --cached --quiet; then
+#             echo "✅ No ArgoCD changes to commit"
+#             exit 0
+#           fi
+          
+#           AUTOSCALING_VALUE="${{ inputs.mode == 'night' && 'false' || 'true' }}"
+#           COMMIT_MSG="chore(${{ matrix.service.name }}): toggle autoscaling.enabled to $AUTOSCALING_VALUE [skip ci]"
+          
+#           git remote set-url origin "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/${{ matrix.service.repo }}.git"
+          
+#           GIT_RETRY=0
+#           until [ "$GIT_RETRY" -ge 10 ]; do
+#             if git commit -m "$COMMIT_MSG" && git push; then
+#               echo "✅ Pushed ArgoCD changes"
+#               break
+#             fi
+#             GIT_RETRY=$((GIT_RETRY + 1))
+#             sleep $((1 + RANDOM % 5))
+#             git pull --rebase
+#           done
+
+#   toggle-keda:
+#     name: "Apply or delete KEDA files for scaling"
+#     runs-on: ubuntu-latest
+#     if: inputs.keda_files != '[]'
+#     strategy:
+#       fail-fast: false
+#       matrix:
+#         keda_file: ${{ fromJson(inputs.keda_files) }}
+    
+#     steps:
+#       - name: "Checkout stacks repo (KEDA manifests)"
+#         uses: actions/checkout@v4
+#         with:
+#           repository: vajrapu-srikanth04/stacks
+#           path: keda-repo
+#           token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
+      
+#       - name: "Checkout shared workflows"
+#         uses: actions/checkout@v4
+#         with:
+#           repository: vajrapu-srikanth04/shared-workflows
+#           path: pyscripts
+#           token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
+
+#       - name: "Toggle KEDA file"
+#         env:
+#           FILE_PATH: "keda-repo/${{ matrix.keda_file.path }}"
+#           MODE: "${{ inputs.mode }}"
+#         run: |
+#           python3 pyscripts/utils/toggle-keda.py "$FILE_PATH" "$MODE"
+
+#       - name: "Commit and push KEDA changes"
+#         run: |
+#           cd "keda-repo"
+#           git config user.name "github-actions[bot]"
+#           git config user.email "github-actions[bot]@users.noreply.github.com"
+#           git add ${{ matrix.keda_file.path }}
+          
+#           if git diff --cached --quiet; then
+#             echo "✅ No KEDA changes to commit"
+#             exit 0
+#           fi
+          
+#           COMMIT_MSG="chore: toggle KEDA scaling to ${{ inputs.mode }} mode [skip ci]"
+          
+#           git remote set-url origin "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/stacks.git"
+          
+#           GIT_RETRY=0
+#           until [ "$GIT_RETRY" -ge 10 ]; do
+#             if git commit -m "$COMMIT_MSG" && git push; then
+#               echo "✅ Pushed KEDA changes"
+#               break
+#             fi
+#             GIT_RETRY=$((GIT_RETRY + 1))
+#             sleep $((1 + RANDOM % 5))
+#             git pull --rebase
+#           done
+
+
 name: "[Reusable] Toggle HPA / KEDA scaling"
 
 on:
@@ -16,179 +212,198 @@ on:
         required: true
         type: string
     secrets:
-      GH_TOKEN:  # ✅ Renamed from GITHUB_TOKEN
+      GH_TOKEN:
         description: 'GitHub token with repo access'
         required: true
 
 jobs:
-  toggle-argocd-hpa:
-    name: "Toggle HPA / KEDA scaling for ArgoCD services"
+  toggle-all-scaling:
+    name: "Toggle HPA / KEDA scaling for all services"
     runs-on: ubuntu-latest
-    if: inputs.argocd_services != '[]'
-    strategy:
-      fail-fast: false
-      matrix:
-        service: ${{ fromJson(inputs.argocd_services) }}
-    
     steps:
-      - name: "Checkout ArgoCD manifests repo"
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ matrix.service.repo }}
-          path: argocd-manifests
-          token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
+      # ======================
+      # Setup & Dependencies
+      # ======================
+      - name: "Install dependencies"
+        run: |
+          pip install ruamel.yaml jq
+          sudo snap install yq
+          export PATH="/snap/bin:$PATH"
 
-      - name: "Checkout shared workflows"
-        uses: actions/checkout@v4
-        with:
-          repository: vajrapu-srikanth04/shared-workflows
-          path: pyscripts
-          token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
-
-      - name: "Check if hpa.yaml exists in helm chart"
-        id: hpa_check
+      # ======================
+      # Process ArgoCD Services (Sequential Loop)
+      # ======================
+      - name: "Process ArgoCD services"
+        if: inputs.argocd_services != '[]'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          MODE: ${{ inputs.mode }}
+          ARGOCD_SERVICES: ${{ inputs.argocd_services }}
         run: |
           set -e
-          pip install ruamel.yaml
-          sudo snap install yq
-    
-          APP_FOLDER="argocd-manifests/${{ matrix.service.application_folder_name }}"
-          ENV_FILE="${{ matrix.service.env_file_name }}"
-          echo "Searching for $ENV_FILE under $APP_FOLDER"
-
-          APP_FILE=$(find "$APP_FOLDER" -type f -name "$ENV_FILE" 2>/dev/null | head -n 1)
+          export PATH="/snap/bin:$PATH"
+          YQ="/snap/bin/yq"
           
-              if [ -z "$APP_FILE" ] || [ ! -f "$APP_FILE" ]; then
-                echo "❌ ArgoCD file not found: $ENV_FILE under $APP_FOLDER"
-                echo "📁 Available files:"
-                find "$APP_FOLDER" -type f -name "*.yaml" | head -20 || true
-                exit 1
-              fi
-              
-              echo "✅ Found ArgoCD file: $APP_FILE"
-              
-              # Extract chart version and path
-              CHART_VERSION=$(yq e '.spec.source.targetRevision' "$APP_FILE")
-              CHART_PATH=$(yq e '.spec.source.path' "$APP_FILE")
-              echo "🎯 targetRevision: $CHART_VERSION, path: $CHART_PATH"
-              
-              HPA_FOUND="false"
-              
-              if [ "$CHART_VERSION" = "main" ] || [ "$CHART_VERSION" = "master" ] || [ "$CHART_VERSION" = "HEAD" ]; then
-                echo "🔍 Cloning helm-charts repo for branch: $CHART_VERSION"
+          echo "🔄 Processing ${{ inputs.mode }} mode for ArgoCD services..."
+          
+          # Loop through each service using jq
+          echo "$ARGOCD_SERVICES" | jq -c '.[]' | while read -r service; do
+            echo ""
+            echo "🔹 Processing service: $(echo "$service" | jq -r '.name')"
+            
+            REPO=$(echo "$service" | jq -r '.repo')
+            APP_FOLDER=$(echo "$service" | jq -r '.application_folder_name')
+            CHART_NAME=$(echo "$service" | jq -r '.chart_name')
+            ENV_FILE=$(echo "$service" | jq -r '.env_file_name')
+            
+            # Checkout the repo
+            REPO_DIR="argocd-${CHART_NAME}"
+            if [ -d "$REPO_DIR" ]; then
+              cd "$REPO_DIR" && git pull && cd ..
+            else
+              git clone --depth 1 \
+                "https://${{github.actor}}:${GH_TOKEN}@github.com/${REPO}.git" \
+                "$REPO_DIR"
+            fi
+            
+            # Find the ArgoCD application file
+            APP_FILE=$(find "$REPO_DIR/$APP_FOLDER" -type f -name "$ENV_FILE" 2>/dev/null | head -n 1)
+            
+            if [ -z "$APP_FILE" ] || [ ! -f "$APP_FILE" ]; then
+              echo "⚠️ ArgoCD file not found: $ENV_FILE under $APP_FOLDER — skipping"
+              continue
+            fi
+            
+            echo "✅ Found: $APP_FILE"
+            
+            # Check if hpa.yaml exists in helm chart
+            CHART_VERSION=$($YQ e '.spec.source.targetRevision' "$APP_FILE")
+            CHART_PATH=$($YQ e '.spec.source.path' "$APP_FILE")
+            HPA_FOUND="false"
+            
+            if [ "$CHART_VERSION" = "main" ] || [ "$CHART_VERSION" = "master" ] || [ "$CHART_VERSION" = "HEAD" ]; then
+              HELM_DIR="helm-charts-${CHART_NAME}"
+              if [ ! -d "$HELM_DIR" ]; then
                 git clone --depth 1 \
-                  "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/helm-charts.git" \
-                  helm-charts 2>/dev/null || true
-                HPA_PATH="helm-charts/${CHART_PATH}/templates/hpa.yaml"
-              else
-                echo "🔍 Pulling OCI chart: ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }}:$CHART_VERSION"
-                echo "${{ secrets.GH_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
-                helm pull "oci://ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }}" \
-                  --version "$CHART_VERSION" --untar --destination /tmp 2>/dev/null || {
-                  echo "⚠️ Failed to pull chart, skipping HPA check"
-                  echo "hpa_found=false" >> $GITHUB_OUTPUT
-                  exit 0
-                }
-                HPA_PATH="/tmp/${{ matrix.service.chart_name }}/templates/hpa.yaml"
+                  "https://${{github.actor}}:${GH_TOKEN}@github.com/vajrapu-srikanth04/helm-charts.git" \
+                  "$HELM_DIR" 2>/dev/null || true
               fi
+              HPA_PATH="$HELM_DIR/${CHART_PATH}/templates/hpa.yaml"
+            else
+              echo "${GH_TOKEN}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
+              helm pull "oci://ghcr.io/vajrapu-srikanth04/${CHART_NAME}" \
+                --version "$CHART_VERSION" --untar --destination /tmp 2>/dev/null || {
+                echo "⚠️ Failed to pull chart — skipping HPA check"
+                continue
+              }
+              HPA_PATH="/tmp/${CHART_NAME}/templates/hpa.yaml"
+            fi
+            
+            if [ ! -f "$HPA_PATH" ]; then
+              echo "⚠️ No HPA file at: $HPA_PATH — skipping"
+              continue
+            fi
+            
+            echo "✅ HPA file found — updating autoscaling parameter"
+            
+            # Toggle the parameter using your Python script
+            AUTOSCALING_VALUE="${MODE == 'night' && 'false' || 'true'}"
+            python3 pyscripts/utils/update-parameters.py add \
+              "$REPO_DIR/$APP_FOLDER" \
+              "$CHART_NAME" \
+              "$ENV_FILE" \
+              "autoscaling.enabled" \
+              "$AUTOSCALING_VALUE"
+            
+            # Commit and push changes
+            cd "$REPO_DIR"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            
+            if git diff --cached --quiet; then
+              echo "✅ No changes for $CHART_NAME"
+            else
+              COMMIT_MSG="chore($CHART_NAME): toggle autoscaling.enabled to $AUTOSCALING_VALUE [skip ci]"
+              git remote set-url origin "https://${{github.actor}}:${GH_TOKEN}@github.com/${REPO}.git"
               
-              if [ -f "$HPA_PATH" ]; then
-                echo "✅ HPA file found: $HPA_PATH"
-                HPA_FOUND="true"
-              else
-                echo "⚠️ No HPA file at: $HPA_PATH"
-              fi
-              echo "hpa_found=$HPA_FOUND" >> $GITHUB_OUTPUT
+              for i in {1..10}; do
+                if git commit -m "$COMMIT_MSG" && git push; then
+                  echo "✅ Pushed changes for $CHART_NAME"
+                  break
+                fi
+                echo "⚠️ Push attempt $i failed, retrying..."
+                git pull --rebase
+                sleep $((1 + RANDOM % 5))
+              done
+            fi
+            cd ..
+          done
 
-      - name: "Toggle autoscaling parameter"
-        if: steps.hpa_check.outputs.hpa_found == 'true'
+      # ======================
+      # Process KEDA Files (Sequential Loop)
+      # ======================
+      - name: "Process KEDA files"
+        if: inputs.keda_files != '[]'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          MODE: ${{ inputs.mode }}
+          KEDA_FILES: ${{ inputs.keda_files }}
         run: |
-          AUTOSCALING_VALUE="${{ inputs.mode == 'night' && 'false' || 'true' }}"
-          python3 pyscripts/utils/update-parameters.py add "${{ github.workspace }}/argocd-manifests/${{ matrix.service.application_folder_name }}" "${{ matrix.service.chart_name }}" "${{ matrix.service.env_file_name }}" "autoscaling.enabled" "$AUTOSCALING_VALUE"
-
-      - name: "Commit and push ArgoCD changes"
-        if: steps.hpa_check.outputs.hpa_found == 'true'
-        run: |
-          cd "${{ github.workspace }}/argocd-manifests"
+          set -e
+          
+          echo "🔄 Processing ${{ inputs.mode }} mode for KEDA files..."
+          
+          # Checkout stacks repo once
+          git clone --depth 1 \
+            "https://${{github.actor}}:${GH_TOKEN}@github.com/vajrapu-srikanth04/stacks.git" \
+            keda-repo
+          
+          # Checkout shared workflows for Python scripts
+          git clone --depth 1 \
+            "https://${{github.actor}}:${GH_TOKEN}@github.com/vajrapu-srikanth04/shared-workflows.git" \
+            pyscripts
+          
+          # Loop through each KEDA file using jq
+          echo "$KEDA_FILES" | jq -c '.[]' | while read -r keda_file; do
+            echo ""
+            echo "🔹 Processing KEDA file: $(echo "$keda_file" | jq -r '.path')"
+            
+            FILE_PATH="keda-repo/$(echo "$keda_file" | jq -r '.path')"
+            
+            if [ ! -f "$FILE_PATH" ]; then
+              echo "⚠️ KEDA file not found: $FILE_PATH — skipping"
+              continue
+            fi
+            
+            # Toggle the KEDA file using your Python script
+            python3 pyscripts/utils/toggle-keda.py "$FILE_PATH" "$MODE"
+            
+            # Show result for debugging
+            COMMENTED=$(grep -c "^#" "$FILE_PATH" 2>/dev/null || echo 0)
+            TOTAL=$(wc -l < "$FILE_PATH" 2>/dev/null || echo 0)
+            echo "📊 Result: $COMMENTED/$TOTAL lines commented"
+          done
+          
+          # Commit and push ALL KEDA changes at once
+          cd keda-repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           
           if git diff --cached --quiet; then
-            echo "✅ No ArgoCD changes to commit"
-            exit 0
-          fi
-          
-          AUTOSCALING_VALUE="${{ inputs.mode == 'night' && 'false' || 'true' }}"
-          COMMIT_MSG="chore(${{ matrix.service.name }}): toggle autoscaling.enabled to $AUTOSCALING_VALUE [skip ci]"
-          
-          git remote set-url origin "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/${{ matrix.service.repo }}.git"
-          
-          GIT_RETRY=0
-          until [ "$GIT_RETRY" -ge 10 ]; do
-            if git commit -m "$COMMIT_MSG" && git push; then
-              echo "✅ Pushed ArgoCD changes"
-              break
-            fi
-            GIT_RETRY=$((GIT_RETRY + 1))
-            sleep $((1 + RANDOM % 5))
-            git pull --rebase
-          done
-
-  toggle-keda:
-    name: "Apply or delete KEDA files for scaling"
-    runs-on: ubuntu-latest
-    if: inputs.keda_files != '[]'
-    strategy:
-      fail-fast: false
-      matrix:
-        keda_file: ${{ fromJson(inputs.keda_files) }}
-    
-    steps:
-      - name: "Checkout stacks repo (KEDA manifests)"
-        uses: actions/checkout@v4
-        with:
-          repository: vajrapu-srikanth04/stacks
-          path: keda-repo
-          token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
-      
-      - name: "Checkout shared workflows"
-        uses: actions/checkout@v4
-        with:
-          repository: vajrapu-srikanth04/shared-workflows
-          path: pyscripts
-          token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
-
-      - name: "Toggle KEDA file"
-        env:
-          FILE_PATH: "keda-repo/${{ matrix.keda_file.path }}"
-          MODE: "${{ inputs.mode }}"
-        run: |
-          python3 pyscripts/utils/toggle-keda.py "$FILE_PATH" "$MODE"
-
-      - name: "Commit and push KEDA changes"
-        run: |
-          cd "keda-repo"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ${{ matrix.keda_file.path }}
-          
-          if git diff --cached --quiet; then
             echo "✅ No KEDA changes to commit"
-            exit 0
+          else
+            COMMIT_MSG="chore: toggle KEDA scaling to ${{ inputs.mode }} mode [skip ci]"
+            git remote set-url origin "https://${{github.actor}}:${GH_TOKEN}@github.com/vajrapu-srikanth04/stacks.git"
+            
+            for i in {1..10}; do
+              if git commit -m "$COMMIT_MSG" && git push; then
+                echo "✅ Pushed KEDA changes"
+                break
+              fi
+              echo "⚠️ Push attempt $i failed, retrying..."
+              git pull --rebase
+              sleep $((1 + RANDOM % 5))
+            done
           fi
-          
-          COMMIT_MSG="chore: toggle KEDA scaling to ${{ inputs.mode }} mode [skip ci]"
-          
-          git remote set-url origin "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/stacks.git"
-          
-          GIT_RETRY=0
-          until [ "$GIT_RETRY" -ge 10 ]; do
-            if git commit -m "$COMMIT_MSG" && git push; then
-              echo "✅ Pushed KEDA changes"
-              break
-            fi
-            GIT_RETRY=$((GIT_RETRY + 1))
-            sleep $((1 + RANDOM % 5))
-            git pull --rebase
-          done
