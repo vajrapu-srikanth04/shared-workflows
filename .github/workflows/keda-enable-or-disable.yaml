@@ -50,7 +50,7 @@ jobs:
         run: |
           set -e
           pip install ruamel.yaml
-          sudo apt install -y yq
+          sudo snap install yq
     
           APP_FOLDER="argocd-manifests/${{ matrix.service.application_folder_name }}"
           ENV_FILE="${{ matrix.service.env_file_name }}"
