@@ -159,7 +159,7 @@ jobs:
           FILE_PATH: "keda-repo/${{ matrix.keda_file.path }}"
           MODE: "${{ inputs.mode }}"
         run: |
-          python3 pyscripts/utils/toggle_keda.py "$FILE_PATH" "$MODE"
+          python3 pyscripts/utils/toggle-keda.py "$FILE_PATH" "$MODE"
 
       - name: "Commit and push KEDA changes"
         run: |
