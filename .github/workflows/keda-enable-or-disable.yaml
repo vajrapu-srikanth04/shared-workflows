@@ -105,7 +105,7 @@ jobs:
         run: |
           AUTOSCALING_VALUE="${{ inputs.mode == 'night' && 'false' || 'true' }}"
           python3 pyscripts/utils/update-parameters.py \
-            add-key-value \
+            add \
             "${{ github.workspace }}/argocd-manifests/${{ matrix.service.application_folder_name }}" \
             "${{ matrix.service.chart_name }}" \
             "${{ matrix.service.env_file_name }}" \
