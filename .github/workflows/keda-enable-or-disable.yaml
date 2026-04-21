@@ -16,7 +16,7 @@ on:
         required: true
         type: string
     secrets:
-      GITHUB_TOKEN:
+      GH_TOKEN:  # ✅ Renamed from GITHUB_TOKEN
         description: 'GitHub token with repo access'
         required: true
 
@@ -36,14 +36,14 @@ jobs:
         with:
           repository: ${{ matrix.service.repo }}
           path: argocd-manifests
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
 
       - name: "Checkout shared workflows"
         uses: actions/checkout@v4
         with:
           repository: vajrapu-srikanth04/shared-workflows
           path: pyscripts
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
 
       - name: "Install dependencies"
         run: |
@@ -63,20 +63,18 @@ jobs:
           
           CHART_VERSION=$(yq e '.spec.source.targetRevision' "$APP_FILE")
           CHART_PATH=$(yq e '.spec.source.path' "$APP_FILE")
-          echo "🎯 targetRevision: $CHART_VERSION, path: $CHART_PATH"
           
           HPA_FOUND="false"
           
           if [ "$CHART_VERSION" = "main" ] || [ "$CHART_VERSION" = "master" ] || [ "$CHART_VERSION" = "HEAD" ]; then
             git clone --depth 1 \
-              "https://${{github.actor}}:${{ secrets.GITHUB_TOKEN }}@github.com/vajrapu-srikanth04/helm-charts.git" \
+              "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/helm-charts.git" \
               helm-charts 2>/dev/null || true
             HPA_PATH="helm-charts/${CHART_PATH}/templates/hpa.yaml"
           else
-            echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
+            echo "${{ secrets.GH_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin 2>/dev/null || true
             helm pull "oci://ghcr.io/vajrapu-srikanth04/${{ matrix.service.chart_name }}" \
               --version "$CHART_VERSION" --untar --destination /tmp 2>/dev/null || {
-              echo "⚠️ Failed to pull chart, skipping HPA check"
               echo "hpa_found=false" >> $GITHUB_OUTPUT
               exit 0
             }
@@ -95,8 +93,6 @@ jobs:
         if: steps.hpa_check.outputs.hpa_found == 'true'
         run: |
           AUTOSCALING_VALUE="${{ inputs.mode == 'night' && 'false' || 'true' }}"
-          echo "🔄 Setting autoscaling.enabled=$AUTOSCALING_VALUE"
-          
           python3 pyscripts/update-parameters.py \
             add \
             "${{ github.workspace }}/argocd-manifests/${{ matrix.service.application_folder_name }}" \
@@ -121,8 +117,7 @@ jobs:
           AUTOSCALING_VALUE="${{ inputs.mode == 'night' && 'false' || 'true' }}"
           COMMIT_MSG="chore(${{ matrix.service.name }}): toggle autoscaling.enabled to $AUTOSCALING_VALUE [skip ci]"
           
-          # Configure auth for push
-          git remote set-url origin "https://${{github.actor}}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ matrix.service.repo }}.git"
+          git remote set-url origin "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/${{ matrix.service.repo }}.git"
           
           GIT_RETRY=0
           until [ "$GIT_RETRY" -ge 10 ]; do
@@ -150,41 +145,21 @@ jobs:
         with:
           repository: vajrapu-srikanth04/stacks
           path: keda-repo
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
       
       - name: "Checkout shared workflows"
         uses: actions/checkout@v4
         with:
           repository: vajrapu-srikanth04/shared-workflows
           path: pyscripts
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: "Debug: Show KEDA file before toggle"
-        run: |
-          FILE_PATH="keda-repo/${{ matrix.keda_file.path }}"
-          echo "🔍 File: $FILE_PATH"
-          echo "📋 First 20 lines before toggle:"
-          head -20 "$FILE_PATH" || echo "⚠️ File not found!"
-          echo "---"
-          # Count commented vs uncommented lines
-          TOTAL=$(wc -l < "$FILE_PATH" 2>/dev/null || echo 0)
-          COMMENTED=$(grep -c "^#" "$FILE_PATH" 2>/dev/null || echo 0)
-          echo "📊 Lines: $TOTAL total, $COMMENTED commented"
+          token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
 
       - name: "Toggle KEDA file"
         env:
           FILE_PATH: "keda-repo/${{ matrix.keda_file.path }}"
           MODE: "${{ inputs.mode }}"
         run: |
-          echo "🔄 Mode: $MODE (night=enable KEDA, morning=disable KEDA)"
           python3 pyscripts/utils/toggle_keda.py "$FILE_PATH" "$MODE"
-          
-          # Show result
-          echo "📋 First 20 lines after toggle:"
-          head -20 "$FILE_PATH"
-          TOTAL=$(wc -l < "$FILE_PATH")
-          COMMENTED=$(grep -c "^#" "$FILE_PATH" || echo 0)
-          echo "📊 Lines: $TOTAL total, $COMMENTED commented"
 
       - name: "Commit and push KEDA changes"
         run: |
@@ -194,14 +169,13 @@ jobs:
           git add .
           
           if git diff --cached --quiet; then
-            echo "✅ No KEDA changes to commit (file may already be in target state)"
+            echo "✅ No KEDA changes to commit"
             exit 0
           fi
           
           COMMIT_MSG="chore: toggle KEDA scaling to ${{ inputs.mode }} mode [skip ci]"
           
-          # Configure auth for push
-          git remote set-url origin "https://${{github.actor}}:${{ secrets.GITHUB_TOKEN }}@github.com/vajrapu-srikanth04/stacks.git"
+          git remote set-url origin "https://${{github.actor}}:${{ secrets.GH_TOKEN }}@github.com/vajrapu-srikanth04/stacks.git"
           
           GIT_RETRY=0
           until [ "$GIT_RETRY" -ge 10 ]; do
