@@ -45,15 +45,13 @@ jobs:
           path: pyscripts
           token: ${{ secrets.GH_TOKEN }}  # ✅ Use GH_TOKEN
 
-      - name: "Install dependencies"
-        run: |
-          pip install ruamel.yaml
-          sudo apt install yq
-
       - name: "Check if hpa.yaml exists in helm chart"
         id: hpa_check
         run: |
           set -e
+          pip install ruamel.yaml
+          sudo apt install yq
+    
           APP_FOLDER="argocd-manifests/${{ matrix.service.application_folder_name }}"
           ENV_FILE="${{ matrix.service.env_file_name }}"
           echo "Searching for $ENV_FILE under $APP_FOLDER"
