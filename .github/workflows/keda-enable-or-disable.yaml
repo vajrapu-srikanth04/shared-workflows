@@ -48,7 +48,7 @@ jobs:
       - name: "Install dependencies"
         run: |
           pip install ruamel.yaml
-          sudo snap install yq
+          sudo apt install yq
 
       - name: "Check if hpa.yaml exists in helm chart"
         id: hpa_check
