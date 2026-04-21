@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import sys
-from pathlib import path
+from pathlib import Path
 from ruamel.yaml import YAML
 
 yaml = YAML()
