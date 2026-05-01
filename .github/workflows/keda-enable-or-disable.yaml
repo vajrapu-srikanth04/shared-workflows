@@ -245,7 +245,7 @@ jobs:
       - name: Checkout KEDA manifest repo
         uses: actions/checkout@v5
         with:
-          respository: vajrapu-srikanth04/cf-stacks
+          repository: vajrapu-srikanth04/cf-stacks
           token: ${{ secrets.GH_TOKEN }}
           path: keda-repo
       
