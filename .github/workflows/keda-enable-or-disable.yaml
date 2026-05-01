@@ -117,7 +117,7 @@ jobs:
               if [ ! -d "helm-charts" ]; then
                 echo "▶ Cloning sparq-helm-charts..."
                 git clone \
-                  "https://${GH_ACTOR}:${GH_TOKEN}@github.com/vajrapu-srikanth04/sparq-helm-charts.git" \
+                  "https://${GH_ACTOR}:${GH_TOKEN}@github.com/vajrapu-srikanth04/helm-charts.git" \
                   helm-charts
               fi
               HPA_PATH="helm-charts/charts/$CHART_NAME/templates/hpa.yaml"
