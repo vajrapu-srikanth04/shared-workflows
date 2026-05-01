@@ -144,7 +144,7 @@ jobs:
 
             # -- Patch if hpa.yaml exists -------------------------------
             if [ "$HPA_FOUND" = "true" ]; then
-              if [ "$MODE" == "night"]; then
+              if [ "$MODE" == "night" ]; then
                 echo "▶ NIGHT → overriding autoscaling.enabled=false"
                 python3 py-scripts/utils/update-parameters.py \
                   add \
