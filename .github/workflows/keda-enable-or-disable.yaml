@@ -27,8 +27,8 @@ on:
 jobs:
   toggle-argocd-hpa:
     name: "HPA [${{ matrix.service.name }}] → autoscaling.enabled = ${{ inputs.mode == 'night' && 'false' || 'true' }}"
-    runs-on: ubuntu-latest
-      # group: linux
+    runs-on:
+      group: linux
     # strategy:
     #   fail-fast: false
     #   matrix:
@@ -128,7 +128,7 @@ jobs:
                 echo "▶ Pulling helm chart version $CHART_NAME..."
                 echo "$GH_TOKEN" | helm registry login ghcr.io \
                   -u "$GH_ACTOR" --password-stdin
-                helm pull "oci://ghcr.io/vajrapu-srikanth04/"$CHART_NAME" \
+                helm pull "oci://ghcr.io/vajrapu-srikanth04/$CHART_NAME" \
                   --version "$CHART_VERSION" --untar
               fi
               HPA_PATH="$CHART_NAME/templates/hpa.yaml"
@@ -245,7 +245,7 @@ jobs:
       - name: Checkout KEDA manifest repo
         uses: actions/checkout@v5
         with:
-          repository: vajrapu-srikanth04/stacks
+          repository: vajrapu-srikanth04/cf-stacks
           token: ${{ secrets.GH_TOKEN }}
           path: keda-repo
       
