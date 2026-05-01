@@ -27,8 +27,8 @@ on:
 jobs:
   toggle-argocd-hpa:
     name: "HPA [${{ matrix.service.name }}] → autoscaling.enabled = ${{ inputs.mode == 'night' && 'false' || 'true' }}"
-    runs-on:
-      group: linux
+    runs-on: ubuntu-latest
+      # group: linux
     # strategy:
     #   fail-fast: false
     #   matrix:
