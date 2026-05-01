@@ -207,7 +207,7 @@ jobs:
           GIT_RETRY=0
           MAX_RETRIES=10
 
-          until [ "$GIT_RETRY" -lt "$MAX_RETRIES" ]; do
+          while [ "$GIT_RETRY" -lt "$MAX_RETRIES" ]; do
             echo "▶ Attempting push (try $((GIT_RETRY+1))/$MAX_RETRIES)..."
             
             if git push; then
